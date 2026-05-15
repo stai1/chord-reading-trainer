@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import abcjs from 'abcjs';
 import './App.css';
 import { SettingsModal } from './components/SettingsModal';
-import { StaffDisplay, centerInnerGroup } from './components/StaffDisplay';
+import { StaffDisplay } from './components/StaffDisplay';
 import { LeadSheetDisplay } from './components/LeadSheetDisplay';
 import { PianoRoll } from './components/PianoRoll';
+import { renderEmptyStaff } from './music/vexRender';
+import { KEY_SIGNATURES } from './music/types';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -41,7 +42,7 @@ const initialSession: SessionState = {
   exerciseInSet: 0,
   currentExercise: null,
   phase: 'cue',
-  paused: true,
+  paused: false,
   nextEnabledAt: 0,
 };
 
@@ -70,6 +71,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
+  // Pause the session while the settings modal is open; resume when it closes.
+  useEffect(() => {
+    setSession((s) => ({ ...s, paused: settingsOpen }));
+  }, [settingsOpen]);
+
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
@@ -79,6 +85,41 @@ export default function App() {
 
   const advance = useCallback(() => {
     setSession((prev) => {
+      // Helper: produce the state for "advance past the current exercise" —
+      // either generating the next exercise in the same set, or transitioning
+      // to a new set's cue. Releases any active audio along the way.
+      const advancePastExercise = (state: SessionState): SessionState => {
+        if (releaseRef.current) {
+          releaseRef.current();
+          releaseRef.current = null;
+        }
+        if (state.exerciseInSet >= settings.setLength) {
+          const next = pickNextSet(settings, state.setHistory);
+          if (!next) return state;
+          return {
+            ...state,
+            setSpec: next,
+            setHistory: [...state.setHistory, next],
+            withinSetBuffer: [],
+            exerciseInSet: 0,
+            currentExercise: null,
+            phase: 'cue',
+            nextEnabledAt: Date.now() + 1000,
+          };
+        }
+        if (!state.setSpec) return state;
+        const ex = generateExercise(state.setSpec, settings, state.withinSetBuffer);
+        if (!ex) return state;
+        return {
+          ...state,
+          currentExercise: ex,
+          phase: 'prompt',
+          exerciseInSet: state.exerciseInSet + 1,
+          withinSetBuffer: [...state.withinSetBuffer, ex.shuffleKey],
+          nextEnabledAt: Date.now() + 1000,
+        };
+      };
+
       if (prev.phase === 'cue') {
         if (!prev.setSpec) return prev;
         const ex = generateExercise(prev.setSpec, settings, prev.withinSetBuffer);
@@ -93,38 +134,14 @@ export default function App() {
         };
       }
       if (prev.phase === 'prompt') {
+        // If reveal is disabled, skip directly to the next exercise (or cue).
+        if (!settings.showReveal) {
+          return advancePastExercise(prev);
+        }
         return { ...prev, phase: 'reveal', nextEnabledAt: Date.now() + 1000 };
       }
       if (prev.phase === 'reveal') {
-        if (releaseRef.current) {
-          releaseRef.current();
-          releaseRef.current = null;
-        }
-        if (prev.exerciseInSet >= settings.setLength) {
-          const next = pickNextSet(settings, prev.setHistory);
-          if (!next) return prev;
-          return {
-            ...prev,
-            setSpec: next,
-            setHistory: [...prev.setHistory, next],
-            withinSetBuffer: [],
-            exerciseInSet: 0,
-            currentExercise: null,
-            phase: 'cue',
-            nextEnabledAt: Date.now() + 1000,
-          };
-        }
-        if (!prev.setSpec) return prev;
-        const ex = generateExercise(prev.setSpec, settings, prev.withinSetBuffer);
-        if (!ex) return prev;
-        return {
-          ...prev,
-          currentExercise: ex,
-          phase: 'prompt',
-          exerciseInSet: prev.exerciseInSet + 1,
-          withinSetBuffer: [...prev.withinSetBuffer, ex.shuffleKey],
-          nextEnabledAt: Date.now() + 1000,
-        };
+        return advancePastExercise(prev);
       }
       return prev;
     });
@@ -182,7 +199,9 @@ export default function App() {
   const nextDisabled = Date.now() < session.nextEnabledAt;
   const hasTimer =
     (settings.promptDuration !== undefined && settings.promptDuration > 0) ||
-    (settings.revealDuration !== undefined && settings.revealDuration > 0);
+    (settings.showReveal &&
+      settings.revealDuration !== undefined &&
+      settings.revealDuration > 0);
 
   const onSaveSettings = (s: Settings) => {
     setSettings(s);
@@ -196,9 +215,18 @@ export default function App() {
   };
 
   const piano = useMemo(() => {
-    if (!session.currentExercise || session.phase !== 'reveal') return null;
-    const midis = session.currentExercise.notes.map((n) => noteToMidi(n, 0));
-    return <PianoRoll highlightedMidi={midis} />;
+    const isReveal = session.phase === 'reveal';
+    const midis =
+      isReveal && session.currentExercise
+        ? session.currentExercise.notes.map((n) => noteToMidi(n, 0))
+        : [];
+    // Always render the PianoRoll so its layout space is reserved, regardless
+    // of phase (cue / prompt / reveal). Hide it visually outside reveal.
+    return (
+      <div style={{ visibility: isReveal ? 'visible' : 'hidden' }}>
+        <PianoRoll highlightedMidi={midis} />
+      </div>
+    );
   }, [session.currentExercise, session.phase]);
 
   return (
@@ -250,9 +278,9 @@ export default function App() {
                     numeralSystem={settings.numeralSystem}
                   />
                 )}
-                {piano}
               </>
             )}
+            {piano}
           </div>
         </div>
       </main>
@@ -288,18 +316,9 @@ function EmptyStaff({ keyId }: { keyId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    const abc =
-      `X:1\nL:1\nM:none\n` +
-      `%%score {T | B}\n` +
-      `V:T clef=treble\nV:B clef=bass\n` +
-      `K:${keyId}\n` +
-      `[V:T]z|\n[V:B]z|\n`;
-    abcjs.renderAbc(ref.current, abc, {
-      staffwidth: 320,
-      scale: 1.2,
-      responsive: 'resize',
-    });
-    centerInnerGroup(ref.current);
+    const key = KEY_SIGNATURES.find((k) => k.id === keyId);
+    if (!key) return;
+    renderEmptyStaff(ref.current, key);
   }, [keyId]);
   return <div ref={ref} className="staff-display" />;
 }

@@ -32,9 +32,11 @@ export function splitAcrossClefs(
   const N = fullChord.length;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // Bass selection
+    // Bass selection: pick j unique indices, then sort ascending so the chord
+    // tones stay in their original (stacked-third) order. The randomness is
+    // only over *which* notes get assigned to the bass, not their order.
     const j = 1 + Math.floor(rng() * N); // 1..N
-    const bassIdxs = pickRandomIndices(N, j, rng);
+    const bassIdxs = pickRandomIndices(N, j, rng).sort((a, b) => a - b);
     const bassNotesBase: Note[] = bassIdxs
       .map((i) => fullChord[i])
       .filter((n): n is Note => n !== undefined);

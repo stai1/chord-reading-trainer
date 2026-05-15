@@ -8,6 +8,8 @@ export interface Settings {
   leadFigures: FigureType[];
   numeralSystem: NumeralSystem;
   setLength: number;
+  /** Whether the reveal phase is shown. If false, exercises skip from prompt directly to the next prompt. */
+  showReveal: boolean;
   /** seconds; undefined => indefinite (manual advance only) */
   promptDuration: number | undefined;
   revealDuration: number | undefined;
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   leadFigures: ['triad', '7th'],
   numeralSystem: 'scale-relative',
   setLength: 12,
+  showReveal: true,
   promptDuration: 5,
   revealDuration: 3,
 };
