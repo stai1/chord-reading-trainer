@@ -78,14 +78,31 @@ body {
   display: flex;
   flex-direction: column;
 }
+.phase-countdown {
+  font-size: 14px;
+  color: #666;
+  text-align: center;
+  min-height: 20px;
+  margin-bottom: 4px;
+  flex: 0 0 auto;
+  /* Push the countdown (and everything after) toward the bottom of the column. */
+  margin-top: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Use tabular figures so digit widths are uniform across values. */
+  font-variant-numeric: tabular-nums;
+}
+.phase-countdown-number {
+  display: inline-block;
+  /* Reserve room for up to 3 digits so the surrounding text never shifts. */
+  min-width: 2.2ch;
+  text-align: right;
+}
 .exercise-controls {
   display: flex;
   gap: 16px;
   justify-content: center;
   flex: 0 0 auto;
-  /* Push the controls (and everything after them) toward the bottom of the
-     column. Any leftover vertical space goes above the controls. */
-  margin-top: auto;
 }
 .exercise-region {
   flex: 0 0 auto;

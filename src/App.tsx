@@ -55,6 +55,29 @@ export default function App() {
   const releaseRef = useRef<(() => void) | null>(null);
   const [nowTick, setNowTick] = useState(0);
 
+  /**
+   * Stacked-timer countdown model.
+   *
+   * The active phase's duration is broken into a sequence of "ticks":
+   *   - an optional fractional first tick of `frac` seconds, where
+   *     `frac = duration - floor(duration)`,
+   *   - followed by `floor(duration)` ticks of exactly 1 second each.
+   *
+   * The displayed countdown is the number of ticks remaining (including the
+   * in-flight one), so it's a discrete integer count that decrements when each
+   * tick fires. The final tick fires `advance()`.
+   *
+   * Pause/resume: when paused, capture the remaining-ms of the in-flight tick
+   * plus the number of full 1s ticks still queued. Resume by rescheduling
+   * with that remaining time as the first tick.
+   */
+  /** Number of ticks remaining (including the in-flight one). Null if no timer. */
+  const [ticksRemaining, setTicksRemaining] = useState<number | null>(null);
+  /** Absolute ms timestamp when the current in-flight tick fires. */
+  const [tickEndsAt, setTickEndsAt] = useState<number | null>(null);
+  /** While paused, remaining ms of the in-flight tick at pause time. */
+  const pausedRemainingTickMs = useRef<number | null>(null);
+
   useEffect(() => {
     const loaded = loadSettings();
     setSettings(loaded);
@@ -85,6 +108,33 @@ export default function App() {
 
   const advance = useCallback(() => {
     setSession((prev) => {
+      /**
+       * Returns whether the given phase had an automatic timer under the
+       * current settings. Used to decide whether the *next* phase should
+       * disable the Next button for 1s.
+       *
+       * - cue: always has a timer (2s).
+       * - prompt: has a timer iff promptDuration is set.
+       * - reveal: has a timer iff showReveal is on AND revealDuration is set.
+       */
+      const phaseHadTimer = (phase: Phase): boolean => {
+        if (phase === 'cue') return true;
+        if (phase === 'prompt') {
+          return settings.promptDuration !== undefined && settings.promptDuration > 0;
+        }
+        // reveal
+        return (
+          settings.showReveal &&
+          settings.revealDuration !== undefined &&
+          settings.revealDuration > 0
+        );
+      };
+      /** Compute nextEnabledAt for a phase transition out of `fromPhase`.
+       *  Disable Next for 1s only if the previous shown phase had a timer. */
+      const computeNextEnabledAt = (fromPhase: Phase): number => {
+        return phaseHadTimer(fromPhase) ? Date.now() + 1000 : 0;
+      };
+
       // Helper: produce the state for "advance past the current exercise" —
       // either generating the next exercise in the same set, or transitioning
       // to a new set's cue. Releases any active audio along the way.
@@ -104,7 +154,7 @@ export default function App() {
             exerciseInSet: 0,
             currentExercise: null,
             phase: 'cue',
-            nextEnabledAt: Date.now() + 1000,
+            nextEnabledAt: computeNextEnabledAt(state.phase),
           };
         }
         if (!state.setSpec) return state;
@@ -116,7 +166,7 @@ export default function App() {
           phase: 'prompt',
           exerciseInSet: state.exerciseInSet + 1,
           withinSetBuffer: [...state.withinSetBuffer, ex.shuffleKey],
-          nextEnabledAt: Date.now() + 1000,
+          nextEnabledAt: computeNextEnabledAt(state.phase),
         };
       };
 
@@ -130,7 +180,7 @@ export default function App() {
           phase: 'prompt',
           exerciseInSet: 1,
           withinSetBuffer: [...prev.withinSetBuffer, ex.shuffleKey],
-          nextEnabledAt: Date.now() + 1000,
+          nextEnabledAt: computeNextEnabledAt(prev.phase),
         };
       }
       if (prev.phase === 'prompt') {
@@ -138,7 +188,11 @@ export default function App() {
         if (!settings.showReveal) {
           return advancePastExercise(prev);
         }
-        return { ...prev, phase: 'reveal', nextEnabledAt: Date.now() + 1000 };
+        return {
+          ...prev,
+          phase: 'reveal',
+          nextEnabledAt: computeNextEnabledAt(prev.phase),
+        };
       }
       if (prev.phase === 'reveal') {
         return advancePastExercise(prev);
@@ -147,8 +201,13 @@ export default function App() {
     });
   }, [settings]);
 
+  // Trigger reveal-phase audio when the phase enters 'reveal' (or the current
+  // exercise changes within the reveal phase). Pause/resume does NOT re-trigger
+  // playback or release notes — notes hold through pauses and are only released
+  // when the phase changes, the exercise changes, or settings reset clears the
+  // current exercise.
   useEffect(() => {
-    if (session.phase === 'reveal' && session.currentExercise && !session.paused) {
+    if (session.phase === 'reveal' && session.currentExercise) {
       const midis = session.currentExercise.notes.map((n) => noteToMidi(n, 0));
       releaseRef.current = playChord(midis);
     }
@@ -158,24 +217,93 @@ export default function App() {
         releaseRef.current = null;
       }
     };
-  }, [session.phase, session.currentExercise, session.paused]);
+  }, [session.phase, session.currentExercise]);
 
+  /** Duration of the current phase in seconds, or null if the phase is
+   *  indefinite (user-advance only). */
+  const phaseDurationSec = useMemo<number | null>(() => {
+    if (session.phase === 'cue') return 2;
+    if (session.phase === 'prompt') {
+      return settings.promptDuration !== undefined && settings.promptDuration > 0
+        ? settings.promptDuration
+        : null;
+    }
+    if (session.phase === 'reveal') {
+      return settings.revealDuration !== undefined && settings.revealDuration > 0
+        ? settings.revealDuration
+        : null;
+    }
+    return null;
+  }, [session.phase, settings.promptDuration, settings.revealDuration]);
+
+  // When the phase or current exercise changes, initialize the tick stack.
+  // Ticks: optional fractional first tick + ceil(D) ticks total (one of which
+  // may be the fractional one). The displayed countdown shows `ticksRemaining`.
+  useEffect(() => {
+    pausedRemainingTickMs.current = null;
+    if (phaseDurationSec === null) {
+      setTicksRemaining(null);
+      setTickEndsAt(null);
+      return;
+    }
+    const frac = phaseDurationSec - Math.floor(phaseDurationSec);
+    const firstTickMs = frac > 0 ? frac * 1000 : 1000;
+    const totalTicks = Math.ceil(phaseDurationSec);
+    setTicksRemaining(totalTicks);
+    if (!session.paused) {
+      setTickEndsAt(Date.now() + firstTickMs);
+    } else {
+      setTickEndsAt(null);
+      pausedRemainingTickMs.current = firstTickMs;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.phase, session.currentExercise, phaseDurationSec]);
+
+  // Pause / resume handling.
+  useEffect(() => {
+    if (session.paused) {
+      if (tickEndsAt !== null) {
+        pausedRemainingTickMs.current = Math.max(0, tickEndsAt - Date.now());
+        setTickEndsAt(null);
+      }
+    } else {
+      if (pausedRemainingTickMs.current !== null) {
+        setTickEndsAt(Date.now() + pausedRemainingTickMs.current);
+        pausedRemainingTickMs.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.paused]);
+
+  // Schedule the in-flight tick. When it fires: decrement ticksRemaining; if
+  // none left, advance the phase; otherwise queue the next 1-second tick.
   useEffect(() => {
     clearTimer();
     if (session.paused) return;
-    if (session.phase === 'cue') {
-      timerRef.current = window.setTimeout(advance, 2000);
-    } else if (session.phase === 'prompt') {
-      if (settings.promptDuration !== undefined && settings.promptDuration > 0) {
-        timerRef.current = window.setTimeout(advance, settings.promptDuration * 1000);
+    if (tickEndsAt === null || ticksRemaining === null) return;
+
+    const remaining = tickEndsAt - Date.now();
+
+    const fire = () => {
+      const next = (ticksRemaining ?? 1) - 1;
+      if (next <= 0) {
+        // This was the last tick: advance the phase.
+        setTicksRemaining(null);
+        setTickEndsAt(null);
+        advance();
+      } else {
+        setTicksRemaining(next);
+        setTickEndsAt(Date.now() + 1000);
       }
-    } else if (session.phase === 'reveal') {
-      if (settings.revealDuration !== undefined && settings.revealDuration > 0) {
-        timerRef.current = window.setTimeout(advance, settings.revealDuration * 1000);
-      }
+    };
+
+    if (remaining <= 0) {
+      fire();
+      return;
     }
+    timerRef.current = window.setTimeout(fire, remaining);
     return clearTimer;
-  }, [session.phase, session.paused, settings.promptDuration, settings.revealDuration, advance, clearTimer]);
+  }, [session.paused, tickEndsAt, ticksRemaining, advance, clearTimer]);
 
   useEffect(() => {
     if (session.nextEnabledAt <= Date.now()) return;
@@ -185,6 +313,10 @@ export default function App() {
     );
     return () => window.clearTimeout(t);
   }, [session.nextEnabledAt, nowTick]);
+
+  /** Displayed countdown: the number of ticks still queued. Null when no
+   *  timer is active. Remains shown while paused (frozen at the current count). */
+  const remainingSeconds: number | null = ticksRemaining;
 
   const togglePause = () => {
     setSession((s) => ({ ...s, paused: !s.paused }));
@@ -238,6 +370,13 @@ export default function App() {
 
       <main className="exercise-area">
         <div className="exercise-display">
+          <div className="phase-countdown">
+            {remainingSeconds !== null && (
+              <>
+                Next in: <span className="phase-countdown-number">{remainingSeconds}</span>s
+              </>
+            )}
+          </div>
           <div className="exercise-controls">
             {hasTimer && (
               <button
