@@ -1,6 +1,6 @@
 # Piano Samples
 
-Audio samples used by the reveal-phase piano playback.
+Audio samples used by all piano playback in the app — reveal-phase chord audio and user-played notes from MIDI keyboard / mouse / touch input. Full 88-key range coverage (A0–C8).
 
 ## Source
 
