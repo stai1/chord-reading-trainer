@@ -118,6 +118,10 @@ function buildStaveNote(notes: Note[], clef: 'treble' | 'bass'): StaveNote {
 const STAFF_WIDTH = 320;
 const STAFF_HEIGHT = 270;
 
+/** Vertical positions for the treble and bass staves within the SVG. */
+const TREBLE_Y = 40;
+const BASS_Y = 140;
+
 /**
  * Render a staff sight-reading exercise into the given container as a grand
  * staff (treble + bass with a brace). Pixel dimensions are fixed regardless
@@ -141,13 +145,9 @@ export function renderExercise(
   renderer.resize(width, height);
   const ctx = renderer.getContext();
 
-  // Stave positions
-  // x = left margin, y = top of each stave
-  // Leave room for the brace/connector on the left.
+  // Stave positions: x = left margin (room for brace), y from module constants.
   const LEFT_MARGIN = 24;
   const STAVE_WIDTH = width - LEFT_MARGIN - 12;
-  const TREBLE_Y = 10;
-  const BASS_Y = 110;
 
   const keyStr = vexKey(exercise.keySignature);
 
@@ -247,8 +247,6 @@ export function renderEmptyStaff(
 
   const LEFT_MARGIN = 24;
   const STAVE_WIDTH = width - LEFT_MARGIN - 12;
-  const TREBLE_Y = 10;
-  const BASS_Y = 110;
 
   const keyStr = vexKey(key);
 

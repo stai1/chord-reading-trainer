@@ -66,7 +66,7 @@ body {
 
 .exercise-area {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   flex: 1;
   padding: 24px 16px;
@@ -75,15 +75,30 @@ body {
   text-align: center;
   width: 100%;
   max-width: 640px;
+  display: flex;
+  flex-direction: column;
 }
 .exercise-controls {
   display: flex;
   gap: 16px;
   justify-content: center;
-  margin-bottom: 24px;
+  flex: 0 0 auto;
+  /* Push the controls (and everything after them) toward the bottom of the
+     column. Any leftover vertical space goes above the controls. */
+  margin-top: auto;
 }
 .exercise-region {
-  min-height: 360px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+/* Piano roll is the last child of .exercise-display. The flex space is
+   absorbed above .exercise-controls (via its margin-top: auto), so the
+   controls + region + piano roll stack naturally at the bottom. */
+.exercise-display > .piano-roll {
+  flex: 0 0 auto;
 }
 
 .lead-sheet-display {

@@ -220,13 +220,7 @@ export default function App() {
       isReveal && session.currentExercise
         ? session.currentExercise.notes.map((n) => noteToMidi(n, 0))
         : [];
-    // Always render the PianoRoll so its layout space is reserved, regardless
-    // of phase (cue / prompt / reveal). Hide it visually outside reveal.
-    return (
-      <div style={{ visibility: isReveal ? 'visible' : 'hidden' }}>
-        <PianoRoll highlightedMidi={midis} />
-      </div>
-    );
+    return <PianoRoll highlightedMidi={midis} />;
   }, [session.currentExercise, session.phase]);
 
   return (
@@ -280,8 +274,8 @@ export default function App() {
                 )}
               </>
             )}
-            {piano}
           </div>
+          {piano}
         </div>
       </main>
 
