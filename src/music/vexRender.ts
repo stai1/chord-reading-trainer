@@ -10,7 +10,8 @@ import {
   TextBracket,
 } from 'vexflow';
 import type { Exercise, KeySignature, Note } from './types';
-import { noteLetterIndex } from './midi';
+import { noteLetterIndex, accidentalSemitone } from './midi';
+import { diatonicAccidentalFor } from './chordToNotes';
 
 /**
  * Threshold for applying 8va to the treble clef: trigger when any treble note's
@@ -74,11 +75,37 @@ function vexKey(key: KeySignature): string {
 }
 
 /**
+ * Returns true if the note's accidental matches what the key signature already
+ * provides for that letter — in which case no accidental glyph should be drawn
+ * (the key signature handles it). E.g., F♯ in G major is diatonic; no glyph.
+ *
+ * - accidental: null is treated as 0 (natural drawn), which is diatonic only
+ *   when the key signature also has 0 for that letter; otherwise an explicit
+ *   natural sign is required.
+ */
+function isDiatonic(note: Note, key: KeySignature): boolean {
+  const noteDelta = accidentalSemitone(note.accidental);
+  const keyDelta = diatonicAccidentalFor(note.letter, key);
+  return noteDelta === keyDelta;
+}
+
+/**
  * Build a StaveNote (chord) for a list of notes on a given clef.
  * Notes are sorted ascending by pitch. Whole-note duration ("w").
  * If notes is empty, returns a whole rest.
+ *
+ * Per-note accidental glyphs are drawn only for notes that *aren't* diatonic
+ * to the active key signature; diatonic alterations are conveyed by the key
+ * signature itself, so adding an accidental modifier would be redundant.
+ * Natural signs are drawn when the letter is altered by the key signature
+ * but the note's pitch is the plain natural letter (so the player knows to
+ * override the key signature).
  */
-function buildStaveNote(notes: Note[], clef: 'treble' | 'bass'): StaveNote {
+function buildStaveNote(
+  notes: Note[],
+  clef: 'treble' | 'bass',
+  key: KeySignature,
+): StaveNote {
   if (notes.length === 0) {
     return new StaveNote({
       keys: [clef === 'treble' ? 'b/4' : 'd/3'],
@@ -103,12 +130,15 @@ function buildStaveNote(notes: Note[], clef: 'treble' | 'bass'): StaveNote {
     clef,
   });
 
-  // Attach accidentals at the correct index for each note.
+  // Attach accidentals only where the note differs from the key signature.
   sorted.forEach((n, i) => {
-    const acc = vexAccidental(n);
-    if (acc !== null) {
-      sn.addModifier(new Accidental(acc), i);
-    }
+    if (isDiatonic(n, key)) return;
+    // For notes whose drawn-accidental field is `null` but which need to be
+    // overridden from the key sig (i.e., letter is sharped/flatted in the
+    // key sig but we want the natural), force a natural glyph.
+    let glyph = vexAccidental(n);
+    if (glyph === null) glyph = 'n';
+    sn.addModifier(new Accidental(glyph), i);
   });
 
   return sn;
@@ -193,8 +223,8 @@ export function renderExercise(
   const trebleEightVa = trebleNotes.length > 0 && trebleNeeds8va(trebleNotes);
   const trebleNotesDisplay = trebleEightVa ? lowerNotesAnOctave(trebleNotes) : trebleNotes;
 
-  const trebleStaveNote = buildStaveNote(trebleNotesDisplay, 'treble');
-  const bassStaveNote = buildStaveNote(bassNotes, 'bass');
+  const trebleStaveNote = buildStaveNote(trebleNotesDisplay, 'treble', exercise.keySignature);
+  const bassStaveNote = buildStaveNote(bassNotes, 'bass', exercise.keySignature);
 
   const trebleVoice = new Voice({ numBeats: 4, beatValue: 4 });
   trebleVoice.setMode(Voice.Mode.SOFT);
