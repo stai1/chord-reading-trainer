@@ -24,6 +24,7 @@ import { noteToMidi } from './music/midi';
 import { playChord, waitForSamples } from './audio/sampler';
 import { useActiveNotes } from './input/activeNotes';
 import { useMidiInput } from './input/midi';
+import { useVirtualKeyboard } from './input/virtualKeyboard';
 
 type Phase = 'cue' | 'prompt' | 'reveal';
 
@@ -61,9 +62,20 @@ export default function App() {
   // Active notes (user input from MIDI keyboard / mouse / touch). Shared state
   // driving piano-roll blue highlight and audio playback. (§5.1 / §5.5)
   const { activeMidi, noteOn, noteOff } = useActiveNotes();
-  useMidiInput({
-    noteOn: (m, velocity) =>
+  // External-MIDI note-on path: normalize velocity, or silence if "Play
+  // external MIDI" is off. Shared by Web MIDI and the dev-only virtual
+  // computer-keyboard input.
+  const externalNoteOn = useCallback(
+    (m: number, velocity: number) =>
       noteOn(m, settings.playExternalMidi ? velocity / 127 : 0),
+    [noteOn, settings.playExternalMidi],
+  );
+  useMidiInput({ noteOn: externalNoteOn, noteOff });
+  // Dev-only virtual keyboard. Disabled while the settings modal is open,
+  // which causes it to release any held notes.
+  useVirtualKeyboard({
+    enabled: !settingsOpen,
+    noteOn: externalNoteOn,
     noteOff,
   });
   // Mirror activeMidi so the reveal-release callback can filter against it
