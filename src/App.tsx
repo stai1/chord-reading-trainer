@@ -8,6 +8,7 @@ import { renderEmptyStaff } from './music/vexRender';
 import { KEY_SIGNATURES } from './music/types';
 import {
   DEFAULT_SETTINGS,
+  clearSettings,
   loadSettings,
   saveSettings,
   type Settings,
@@ -21,6 +22,8 @@ import { keyDisplayName } from './music/numeral';
 import type { Exercise } from './music/types';
 import { noteToMidi } from './music/midi';
 import { playChord, waitForSamples } from './audio/sampler';
+import { useActiveNotes } from './input/activeNotes';
+import { useMidiInput } from './input/midi';
 
 type Phase = 'cue' | 'prompt' | 'reveal';
 
@@ -52,8 +55,23 @@ export default function App() {
   const [session, setSession] = useState<SessionState>(initialSession);
 
   const timerRef = useRef<number | null>(null);
-  const releaseRef = useRef<(() => void) | null>(null);
+  const releaseRef = useRef<((skip?: (midi: number) => boolean) => void) | null>(null);
   const [nowTick, setNowTick] = useState(0);
+
+  // Active notes (user input from MIDI keyboard / mouse / touch). Shared state
+  // driving piano-roll blue highlight and audio playback. (§5.1 / §5.5)
+  const { activeMidi, noteOn, noteOff } = useActiveNotes();
+  useMidiInput({
+    noteOn: (m, velocity) =>
+      noteOn(m, settings.playExternalMidi ? velocity / 127 : 0),
+    noteOff,
+  });
+  // Mirror activeMidi so the reveal-release callback can filter against it
+  // without re-creating the callback on every active-set change.
+  const activeMidiRef = useRef<ReadonlySet<number>>(activeMidi);
+  useEffect(() => {
+    activeMidiRef.current = activeMidi;
+  }, [activeMidi]);
 
   /**
    * Stacked-timer countdown model.
@@ -140,7 +158,8 @@ export default function App() {
       // to a new set's cue. Releases any active audio along the way.
       const advancePastExercise = (state: SessionState): SessionState => {
         if (releaseRef.current) {
-          releaseRef.current();
+          // Skip releasing notes the user is currently holding (§5.5).
+          releaseRef.current((m) => activeMidiRef.current.has(m));
           releaseRef.current = null;
         }
         if (state.exerciseInSet >= settings.setLength) {
@@ -213,7 +232,8 @@ export default function App() {
     }
     return () => {
       if (releaseRef.current) {
-        releaseRef.current();
+        // Don't release notes the user is currently holding (§5.5).
+        releaseRef.current((m) => activeMidiRef.current.has(m));
         releaseRef.current = null;
       }
     };
@@ -335,15 +355,22 @@ export default function App() {
       settings.revealDuration !== undefined &&
       settings.revealDuration > 0);
 
-  const onSaveSettings = (s: Settings) => {
+  const onSaveSettings = (
+    s: Settings,
+    flags: { shouldPersist: boolean; shouldResetExercises: boolean },
+  ) => {
     setSettings(s);
-    saveSettings(s);
-    const first = pickNextSet(s, []);
-    setSession({
-      ...initialSession,
-      setSpec: first,
-      setHistory: first ? [first] : [],
-    });
+    if (flags.shouldPersist) {
+      saveSettings(s);
+    }
+    if (flags.shouldResetExercises) {
+      const first = pickNextSet(s, []);
+      setSession({
+        ...initialSession,
+        setSpec: first,
+        setHistory: first ? [first] : [],
+      });
+    }
   };
 
   const piano = useMemo(() => {
@@ -352,8 +379,15 @@ export default function App() {
       isReveal && session.currentExercise
         ? session.currentExercise.notes.map((n) => noteToMidi(n, 0))
         : [];
-    return <PianoRoll highlightedMidi={midis} />;
-  }, [session.currentExercise, session.phase]);
+    return (
+      <PianoRoll
+        highlightedMidi={midis}
+        activeMidi={activeMidi}
+        onNoteOn={noteOn}
+        onNoteOff={noteOff}
+      />
+    );
+  }, [session.currentExercise, session.phase, activeMidi, noteOn, noteOff]);
 
   return (
     <div className="app">
@@ -423,6 +457,7 @@ export default function App() {
         settings={settings}
         onClose={() => setSettingsOpen(false)}
         onSave={onSaveSettings}
+        onClearStorage={clearSettings}
       />
     </div>
   );

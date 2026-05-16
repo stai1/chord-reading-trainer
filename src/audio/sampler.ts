@@ -86,18 +86,31 @@ export function midiToFreqStr(midi: number): string {
   return `${LETTERS_SHARP[pc] ?? 'C'}${octave}`;
 }
 
+/** Velocity used for reveal-phase auto-playback (§5.5). Half of maximum. */
+export const REVEAL_VELOCITY = 0.5;
+
 /**
- * Play a list of MIDI notes; returns a function to release them.
+ * Play a list of MIDI notes; returns a function to release them. The release
+ * function accepts an optional "skip" predicate so callers can avoid releasing
+ * notes that another input source is still holding (per §5.5 of the spec:
+ * the reveal-phase chord release must not affect user-played notes).
+ *
+ * Notes are triggered at REVEAL_VELOCITY (half of maximum).
  */
-export function playChord(midis: number[]): () => void {
+export function playChord(midis: number[]): (skip?: (midi: number) => boolean) => void {
   const s = getSampler();
   const freqs = midis.map(midiToFreqStr);
   // Ensure context is started (user gesture)
   if (Tone.getContext().state !== 'running') {
     Tone.start();
   }
-  s.triggerAttack(freqs);
-  return () => {
-    s.triggerRelease(freqs);
+  s.triggerAttack(freqs, undefined, REVEAL_VELOCITY);
+  return (skip?: (midi: number) => boolean) => {
+    const released = midis
+      .filter((m) => (skip ? !skip(m) : true))
+      .map(midiToFreqStr);
+    if (released.length > 0) {
+      s.triggerRelease(released);
+    }
   };
 }

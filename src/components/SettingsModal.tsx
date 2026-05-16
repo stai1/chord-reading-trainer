@@ -1,71 +1,71 @@
 import { useState, useEffect, useRef } from 'react';
-import type { Settings } from '../state/settings';
+import { DEFAULT_SETTINGS, type Settings } from '../state/settings';
+import {
+  FIELD_ORDER,
+  hasErrors as errorsExist,
+  isBothClefAllowed,
+  validate,
+  type ErrorKey,
+} from '../state/validation';
 import { KEY_SIGNATURES } from '../music/types';
 import type { Clef, ExerciseType, FigureType, NumeralSystem } from '../music/types';
 
 interface SettingsModalProps {
   open: boolean;
+  /** The current saved settings (used to populate the form and as baseline). */
   settings: Settings;
   onClose: () => void;
-  onSave: (s: Settings) => void;
+  /**
+   * Called on close. The modal supplies the final draft and two flags
+   * indicating whether the host should persist to localStorage and whether
+   * the session needs to be reset for exercise changes.
+   */
+  onSave: (draft: Settings, flags: { shouldPersist: boolean; shouldResetExercises: boolean }) => void;
+  /** Called when the user clicks "Reset to default" — host clears localStorage. */
+  onClearStorage: () => void;
 }
 
-interface ValidationErrors {
-  keySignatures?: string;
-  exerciseTypes?: string;
-  staffFigures?: string;
-  staffClefs?: string;
-  leadFigures?: string;
+type TabId = 'exercise' | 'midi';
+
+/** Whether any exercise-affecting setting differs between `a` and `b`. */
+function exerciseSettingsDiffer(a: Settings, b: Settings): boolean {
+  const arrEq = <T,>(x: T[], y: T[]): boolean => {
+    if (x.length !== y.length) return false;
+    const set = new Set<T>(y);
+    for (const v of x) if (!set.has(v)) return false;
+    return true;
+  };
+  return (
+    !arrEq(a.keySignatureIds, b.keySignatureIds) ||
+    !arrEq(a.exerciseTypes, b.exerciseTypes) ||
+    !arrEq(a.staffFigures, b.staffFigures) ||
+    !arrEq(a.staffClefs, b.staffClefs) ||
+    !arrEq(a.leadFigures, b.leadFigures) ||
+    a.setLength !== b.setLength
+  );
 }
 
-type ErrorKey = keyof ValidationErrors;
-
-/** Order of fields top-to-bottom; used to pick the first error to scroll to. */
-const FIELD_ORDER: ErrorKey[] = [
-  'keySignatures',
-  'exerciseTypes',
-  'staffFigures',
-  'staffClefs',
-  'leadFigures',
-];
-
-/**
- * Returns whether the "both" clef option is allowed by the current draft.
- * The both-clef placement only makes sense when chord-shaped figures (triad
- * or 7th) are in the staff-figures set. This is the single source of truth
- * used for both the disabled state of the checkbox and the auto-clear effect.
- */
-function isBothClefAllowed(draft: Settings): boolean {
-  return draft.staffFigures.includes('triad') || draft.staffFigures.includes('7th');
+/** Deep-ish equality for two Settings objects (treats array order as irrelevant). */
+function settingsEqual(a: Settings, b: Settings): boolean {
+  if (exerciseSettingsDiffer(a, b)) return false;
+  return (
+    a.numeralSystem === b.numeralSystem &&
+    a.showReveal === b.showReveal &&
+    a.promptDuration === b.promptDuration &&
+    a.revealDuration === b.revealDuration &&
+    a.playExternalMidi === b.playExternalMidi
+  );
 }
 
-function validate(draft: Settings): ValidationErrors {
-  const errors: ValidationErrors = {};
-  if (draft.keySignatureIds.length === 0) {
-    errors.keySignatures = 'Select at least one key signature.';
-  }
-  if (draft.exerciseTypes.length === 0) {
-    errors.exerciseTypes = 'Select at least one exercise type.';
-  }
-  // The following only apply when the dependent exercise type is enabled.
-  if (draft.exerciseTypes.includes('staff')) {
-    if (draft.staffFigures.length === 0) {
-      errors.staffFigures = 'Select at least one staff sight reading figure.';
-    }
-    if (draft.staffClefs.length === 0) {
-      errors.staffClefs = 'Select at least one staff sight reading clef.';
-    }
-  }
-  if (draft.exerciseTypes.includes('leadsheet')) {
-    if (draft.leadFigures.length === 0) {
-      errors.leadFigures = 'Select at least one lead sheet reading figure.';
-    }
-  }
-  return errors;
-}
-
-export function SettingsModal({ open, settings, onClose, onSave }: SettingsModalProps) {
+export function SettingsModal({
+  open,
+  settings,
+  onClose,
+  onSave,
+  onClearStorage,
+}: SettingsModalProps) {
   const [draft, setDraft] = useState<Settings>(settings);
+  const [activeTab, setActiveTab] = useState<TabId>('exercise');
   const rowRefs = useRef<Record<ErrorKey, HTMLDivElement | null>>({
     keySignatures: null,
     exerciseTypes: null,
@@ -74,8 +74,27 @@ export function SettingsModal({ open, settings, onClose, onSave }: SettingsModal
     leadFigures: null,
   });
 
+  /**
+   * Baseline for "do we need to persist?": what's currently in localStorage,
+   * conceptually. Initialized from the `settings` prop when the modal opens.
+   * Updated to `DEFAULT_SETTINGS` when the user clicks "Reset to default" (so
+   * that closing immediately afterward — with no further edits — doesn't
+   * re-persist defaults to storage).
+   */
+  const persistedBaselineRef = useRef<Settings>(settings);
+  /**
+   * Baseline for "do we need to reset exercises?": what `settings` was when
+   * the modal opened. Compared to the final draft on close.
+   */
+  const openBaselineRef = useRef<Settings>(settings);
+
   useEffect(() => {
-    setDraft(settings);
+    if (open) {
+      setDraft(settings);
+      setActiveTab('exercise');
+      persistedBaselineRef.current = settings;
+      openBaselineRef.current = settings;
+    }
   }, [settings, open]);
 
   const bothClefAllowed = isBothClefAllowed(draft);
@@ -92,24 +111,39 @@ export function SettingsModal({ open, settings, onClose, onSave }: SettingsModal
   if (!open) return null;
 
   const errors = validate(draft);
-  const hasErrors = Object.keys(errors).length > 0;
+  const hasErrors = errorsExist(errors);
 
   const handleClose = () => {
     if (hasErrors) {
-      // Scroll to the first error in document order.
+      // All current validations live on the Exercise Settings tab; switch to
+      // it so the error rows are reachable, then scroll to the first error.
+      setActiveTab('exercise');
       for (const key of FIELD_ORDER) {
         if (errors[key]) {
           const node = rowRefs.current[key];
           if (node) {
-            node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Defer one frame so the tab switch has applied to the DOM.
+            requestAnimationFrame(() =>
+              node.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+            );
           }
           break;
         }
       }
       return;
     }
-    onSave(draft);
+    const shouldPersist = !settingsEqual(draft, persistedBaselineRef.current);
+    const shouldResetExercises = exerciseSettingsDiffer(draft, openBaselineRef.current);
+    onSave(draft, { shouldPersist, shouldResetExercises });
     onClose();
+  };
+
+  const handleResetToDefault = () => {
+    setDraft(DEFAULT_SETTINGS);
+    // After reset, the new "persisted baseline" is the cleared state: i.e.,
+    // closing without further edits should not re-write defaults to storage.
+    onClearStorage();
+    persistedBaselineRef.current = DEFAULT_SETTINGS;
   };
 
   const setRowRef = (key: ErrorKey) => (node: HTMLDivElement | null) => {
@@ -129,7 +163,29 @@ export function SettingsModal({ open, settings, onClose, onSave }: SettingsModal
           <h2>Settings</h2>
           <button className="close-btn" onClick={handleClose} aria-label="Close settings">×</button>
         </div>
+        <div className="modal-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'exercise'}
+            className={`modal-tab${activeTab === 'exercise' ? ' active' : ''}${hasErrors ? ' has-error' : ''}`}
+            onClick={() => setActiveTab('exercise')}
+          >
+            Exercise Settings
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'midi'}
+            className={`modal-tab${activeTab === 'midi' ? ' active' : ''}`}
+            onClick={() => setActiveTab('midi')}
+          >
+            MIDI Settings
+          </button>
+        </div>
         <div className="modal-body">
+
+          <div hidden={activeTab !== 'exercise'} role="tabpanel">
 
           <div ref={setRowRef('keySignatures')} className={rowClass('keySignatures')}>
             <label>Key signatures</label>
@@ -334,8 +390,26 @@ export function SettingsModal({ open, settings, onClose, onSave }: SettingsModal
             </div>
           </div>
 
+          </div>{/* /tabpanel: exercise */}
+
+          <div hidden={activeTab !== 'midi'} role="tabpanel">
+
+            <div className="form-row">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={draft.playExternalMidi}
+                  onChange={(e) => setDraft({ ...draft, playExternalMidi: e.target.checked })}
+                />
+                <span>Play external MIDI</span>
+              </label>
+            </div>
+
+          </div>{/* /tabpanel: midi */}
+
         </div>
         <div className="footer-actions">
+          <button className="btn" onClick={handleResetToDefault}>Reset to default</button>
           <button className="btn" onClick={handleClose}>Close</button>
         </div>
       </div>

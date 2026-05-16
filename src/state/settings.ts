@@ -1,4 +1,5 @@
 import type { ExerciseType, FigureType, NumeralSystem, Clef } from '../music/types';
+import { isSettingsValid } from './validation';
 
 export interface Settings {
   keySignatureIds: string[];
@@ -13,6 +14,14 @@ export interface Settings {
   /** seconds; undefined => indefinite (manual advance only) */
   promptDuration: number | undefined;
   revealDuration: number | undefined;
+  /**
+   * Whether the app plays audio in response to external MIDI keyboard input.
+   * When false, external-MIDI note-ons still update the active-note state and
+   * the piano-roll blue highlight, but the audio sampler is triggered at
+   * velocity 0 — silent. Useful when the external keyboard already produces
+   * its own audio. Does not affect mouse, touch, or reveal-phase playback.
+   */
+  playExternalMidi: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -29,24 +38,47 @@ export const DEFAULT_SETTINGS: Settings = {
   showReveal: true,
   promptDuration: 5,
   revealDuration: 3,
+  playExternalMidi: true,
 };
 
 const STORAGE_KEY = 'chord-reading-trainer:settings';
 
+/**
+ * Load settings from localStorage. If anything is wrong — missing entry, bad
+ * JSON, wrong shape, or content-invalid — clears the stored value (when
+ * present) and returns defaults.
+ */
 export function loadSettings(): Settings {
+  let raw: string | null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    raw = localStorage.getItem(STORAGE_KEY);
   } catch {
     return DEFAULT_SETTINGS;
   }
+  if (raw === null) return DEFAULT_SETTINGS;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isSettingsValid(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // fall through to clear + defaults
+  }
+  clearSettings();
+  return DEFAULT_SETTINGS;
 }
 
 export function saveSettings(s: Settings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearSettings(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
   } catch {
     // ignore
   }
