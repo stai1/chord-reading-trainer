@@ -7,7 +7,6 @@ import { PianoRoll } from './components/PianoRoll';
 import { renderEmptyStaff } from './music/vexRender';
 import { KEY_SIGNATURES } from './music/types';
 import {
-  DEFAULT_SETTINGS,
   clearSettings,
   loadSettings,
   saveSettings,
@@ -51,7 +50,9 @@ const initialSession: SessionState = {
 };
 
 export default function App() {
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  // Load persisted settings synchronously so the first render reflects them
+  // (and downstream effects like "pick first set" use the right values).
+  const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [session, setSession] = useState<SessionState>(initialSession);
 
@@ -109,8 +110,6 @@ export default function App() {
   const pausedRemainingTickMs = useRef<number | null>(null);
 
   useEffect(() => {
-    const loaded = loadSettings();
-    setSettings(loaded);
     waitForSamples().catch(() => undefined);
   }, []);
 
