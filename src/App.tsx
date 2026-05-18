@@ -62,7 +62,7 @@ export default function App() {
 
   // Active notes (user input from MIDI keyboard / mouse / touch). Shared state
   // driving piano-roll blue highlight and audio playback. (§5.1 / §5.5)
-  const { activeMidi, noteOn, noteOff } = useActiveNotes();
+  const { activeMidi, noteOn, noteOff, pedalDown, pedalUp } = useActiveNotes();
   // External-MIDI note-on path: normalize velocity, or silence if "Play
   // external MIDI" is off. Shared by Web MIDI and the dev-only virtual
   // computer-keyboard input.
@@ -71,13 +71,15 @@ export default function App() {
       noteOn(m, settings.playExternalMidi ? velocity / 127 : 0),
     [noteOn, settings.playExternalMidi],
   );
-  useMidiInput({ noteOn: externalNoteOn, noteOff });
+  useMidiInput({ noteOn: externalNoteOn, noteOff, pedalDown, pedalUp });
   // Dev-only virtual keyboard. Disabled while the settings modal is open,
   // which causes it to release any held notes.
   useVirtualKeyboard({
     enabled: !settingsOpen,
     noteOn: externalNoteOn,
     noteOff,
+    pedalDown,
+    pedalUp,
   });
   // Mirror activeMidi so the reveal-release callback can filter against it
   // without re-creating the callback on every active-set change.

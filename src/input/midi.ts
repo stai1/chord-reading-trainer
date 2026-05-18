@@ -26,6 +26,10 @@ interface MidiMessageEvent {
 interface UseMidiInputOptions {
   noteOn: (midi: number, velocity: number) => void;
   noteOff: (midi: number) => void;
+  /** Damper / sustain pedal down (MIDI CC 64 value >= 64). */
+  pedalDown: () => void;
+  /** Damper / sustain pedal up (MIDI CC 64 value < 64). */
+  pedalUp: () => void;
 }
 
 /**
@@ -39,15 +43,24 @@ interface UseMidiInputOptions {
  * If the Web MIDI API is unavailable, this hook is a no-op (feature
  * degrades gracefully — see §5.2).
  */
-export function useMidiInput({ noteOn, noteOff }: UseMidiInputOptions): void {
+export function useMidiInput({
+  noteOn,
+  noteOff,
+  pedalDown,
+  pedalUp,
+}: UseMidiInputOptions): void {
   const noteOnRef = useRef(noteOn);
   const noteOffRef = useRef(noteOff);
+  const pedalDownRef = useRef(pedalDown);
+  const pedalUpRef = useRef(pedalUp);
   // Keep refs current so the message handler always uses latest callbacks
   // without re-subscribing.
   useEffect(() => {
     noteOnRef.current = noteOn;
     noteOffRef.current = noteOff;
-  }, [noteOn, noteOff]);
+    pedalDownRef.current = pedalDown;
+    pedalUpRef.current = pedalUp;
+  }, [noteOn, noteOff, pedalDown, pedalUp]);
 
   useEffect(() => {
     const nav = navigator as unknown as {
@@ -64,14 +77,19 @@ export function useMidiInput({ noteOn, noteOff }: UseMidiInputOptions): void {
       if (!data || data.length < 1) return;
       const status = data[0]!;
       const cmd = status & 0xf0;
-      const note = data[1] ?? 0;
-      const velocity = data[2] ?? 0;
+      const d1 = data[1] ?? 0;
+      const d2 = data[2] ?? 0;
       if (cmd === 0x90) {
         // Note on (velocity 0 == note off, per MIDI spec)
-        if (velocity > 0) noteOnRef.current(note, velocity);
-        else noteOffRef.current(note);
+        if (d2 > 0) noteOnRef.current(d1, d2);
+        else noteOffRef.current(d1);
       } else if (cmd === 0x80) {
-        noteOffRef.current(note);
+        noteOffRef.current(d1);
+      } else if (cmd === 0xb0 && d1 === 64) {
+        // Control Change CC 64 = damper / sustain pedal.
+        // value >= 64 means down, < 64 means up (MIDI 1.0 spec).
+        if (d2 >= 64) pedalDownRef.current();
+        else pedalUpRef.current();
       }
     };
 

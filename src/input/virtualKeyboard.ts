@@ -23,6 +23,9 @@ interface UseVirtualKeyboardOptions {
   /** Called like a MIDI noteon: velocity 0..127. */
   noteOn: (midi: number, velocity: number) => void;
   noteOff: (midi: number) => void;
+  /** Damper pedal down (mapped from Space key). */
+  pedalDown: () => void;
+  pedalUp: () => void;
 }
 
 /** Key event `.code` => MIDI number. Uses physical key codes so layout is
@@ -81,16 +84,23 @@ export function useVirtualKeyboard({
   enabled,
   noteOn,
   noteOff,
+  pedalDown,
+  pedalUp,
 }: UseVirtualKeyboardOptions): void {
   // Track which MIDI notes are currently held by this virtual keyboard so we
   // can release them on disable / unmount and handle no-repeat correctly.
   const heldRef = useRef<Set<string>>(new Set());
+  const pedalHeldRef = useRef<boolean>(false);
   const noteOnRef = useRef(noteOn);
   const noteOffRef = useRef(noteOff);
+  const pedalDownRef = useRef(pedalDown);
+  const pedalUpRef = useRef(pedalUp);
   useEffect(() => {
     noteOnRef.current = noteOn;
     noteOffRef.current = noteOff;
-  }, [noteOn, noteOff]);
+    pedalDownRef.current = pedalDown;
+    pedalUpRef.current = pedalUp;
+  }, [noteOn, noteOff, pedalDown, pedalUp]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -101,11 +111,28 @@ export function useVirtualKeyboard({
         if (midi !== undefined) noteOffRef.current(midi);
       }
       heldRef.current.clear();
+      if (pedalHeldRef.current) {
+        pedalUpRef.current();
+        pedalHeldRef.current = false;
+      }
       return;
     }
 
     const onKeyDown = (e: KeyboardEvent) => {
       const code = e.code;
+      // Space = damper pedal (dev only).
+      if (code === 'Space') {
+        if (e.repeat) {
+          e.preventDefault();
+          return;
+        }
+        if (!pedalHeldRef.current) {
+          pedalHeldRef.current = true;
+          pedalDownRef.current();
+        }
+        e.preventDefault();
+        return;
+      }
       const midi = KEYMAP[code];
       if (midi === undefined) return;
       // Ignore auto-repeat; native keyboards repeat key-down events while held.
@@ -124,6 +151,14 @@ export function useVirtualKeyboard({
 
     const onKeyUp = (e: KeyboardEvent) => {
       const code = e.code;
+      if (code === 'Space') {
+        if (pedalHeldRef.current) {
+          pedalHeldRef.current = false;
+          pedalUpRef.current();
+        }
+        e.preventDefault();
+        return;
+      }
       const midi = KEYMAP[code];
       if (midi === undefined) return;
       if (!heldRef.current.has(code)) return;
@@ -138,6 +173,10 @@ export function useVirtualKeyboard({
         if (midi !== undefined) noteOffRef.current(midi);
       }
       heldRef.current.clear();
+      if (pedalHeldRef.current) {
+        pedalUpRef.current();
+        pedalHeldRef.current = false;
+      }
     };
 
     const onVisibilityChange = () => {
