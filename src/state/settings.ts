@@ -11,6 +11,12 @@ export interface Settings {
   setLength: number;
   /** Whether the reveal phase is shown. If false, exercises skip from prompt directly to the next prompt. */
   showReveal: boolean;
+  /**
+   * Whether lead-sheet exercises include the chord's root pitch as a bass note
+   * in the reveal-phase playback (a perfect-fifth or more below the chord's
+   * lowest note). Helps the user hear chord function.
+   */
+  playLeadSheetRoot: boolean;
   /** seconds; undefined => indefinite (manual advance only) */
   promptDuration: number | undefined;
   revealDuration: number | undefined;
@@ -36,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   numeralSystem: 'scale-relative',
   setLength: 12,
   showReveal: true,
+  playLeadSheetRoot: true,
   promptDuration: 5,
   revealDuration: 3,
   playExternalMidi: true,

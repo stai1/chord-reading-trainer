@@ -30,22 +30,36 @@ function numeralCase(quality: Quality): 'upper' | 'lower' {
   }
 }
 
+/**
+ * Quality symbol that follows the numeral but before figured bass.
+ *
+ * For 7th chords whose 7th is a *major* 7th (11 semitones above the root),
+ * an "M" is appended to disambiguate from the minor 7th / dominant 7th
+ * spellings that otherwise share the same numeral case:
+ *   - major-7th       (uppercase root)   → "M"      e.g., IM⁷
+ *   - dominant-7th    (uppercase root)   → ""       e.g., V⁷
+ *   - minor-major-7th (lowercase root)   → "M"      e.g., iM⁷
+ *   - minor-7th       (lowercase root)   → ""       e.g., ii⁷
+ * Triad qualities and the diminished-family 7ths keep their existing symbols.
+ */
 function qualitySuffix(quality: Quality, isSeventh: boolean): string {
-  // Quality symbol that follows the numeral but before figured bass.
+  void isSeventh; // informational; figured-bass numerals carry the "7"
   switch (quality) {
     case 'augmented':
-    case 'augmented-major-7th':
       return '+';
+    case 'augmented-major-7th':
+      return '+M';
     case 'diminished':
     case 'diminished-7th':
       return '°';
     case 'half-diminished-7th':
       return 'ø';
+    case 'major-7th':
+    case 'minor-major-7th':
+      return 'M';
     default:
       return '';
   }
-  // Note: isSeventh is informational; figured-bass numerals carry the "7".
-  void isSeventh;
 }
 
 /**

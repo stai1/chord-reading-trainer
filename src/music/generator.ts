@@ -20,6 +20,7 @@ import {
 } from './placement';
 import { splitAcrossClefs } from './bothClef';
 import { generateSingleNote } from './singleNote';
+import { noteLetterIndex, noteToMidi, TREBLE_LOW_LETTER } from './midi';
 import type { Settings } from '../state/settings';
 
 export interface SetSpec {
@@ -321,9 +322,16 @@ function generateLeadSheetExercise(
 
     const chord = chordToNotes(key, entry.root, entry.accidental, entry.quality);
     const inverted = applyInversion(chord, inversion);
-    const range = TREBLE_RANGE;
-    const shift = pickOctaveShift(inverted, range, rng);
+
+    // Place the chord at the lowest octave shift such that every note's letter
+    // position is at or above A3.
+    const shift = pickLowestPlacementAboveA3(inverted);
     const placedNotes = shiftOctaves(inverted, shift);
+
+    // Optionally prepend the chord's root, an octave (or more) below the chord.
+    const finalNotes = settings.playLeadSheetRoot
+      ? prependRootBelow(placedNotes, chord[0]!)
+      : placedNotes;
 
     const shuffleKey = `${figure}|${entry.root}|${entry.accidental ?? 'nat'}|${entry.quality}|inv${inversion}`;
     if (recent.has(shuffleKey)) continue;
@@ -335,11 +343,49 @@ function generateLeadSheetExercise(
       displayMode,
       poolEntry: entry,
       inversion,
-      notes: placedNotes,
+      notes: finalNotes,
       shuffleKey,
     };
   }
   return null;
+}
+
+/**
+ * Find the lowest octave shift (most negative) such that every note's letter
+ * index is ≥ A3 (the bottom of the treble range, §3.3.2). Returns the shift
+ * to apply via shiftOctaves.
+ */
+function pickLowestPlacementAboveA3(notes: Note[]): number {
+  if (notes.length === 0) return 0;
+  for (let shift = -4; shift <= 8; shift++) {
+    const shifted = shiftOctaves(notes, shift);
+    const minLetter = Math.min(...shifted.map((n) => noteLetterIndex(n, 0)));
+    if (minLetter >= TREBLE_LOW_LETTER) return shift;
+  }
+  return 0;
+}
+
+/**
+ * Prepend a copy of the chord's root (at its root-position octave-0 form) so
+ * that its MIDI pitch is the highest octave that's still at least a perfect
+ * 5th (7 semitones) below the chord's current lowest MIDI pitch.
+ */
+function prependRootBelow(chordNotes: Note[], rootNote: Note): Note[] {
+  if (chordNotes.length === 0) return chordNotes;
+  const chordLowestMidi = Math.min(...chordNotes.map((n) => noteToMidi(n, 0)));
+  const ceiling = chordLowestMidi - 7; // root MIDI must be ≤ this
+
+  // The root note in its native form has octave 0; its MIDI varies by octave shift.
+  // Find the highest shift such that noteToMidi(rootNote, shift, key) <= ceiling.
+  let bestShift: number | null = null;
+  for (let shift = -8; shift <= 8; shift++) {
+    const m = noteToMidi(rootNote, shift);
+    if (m <= ceiling) bestShift = shift;
+  }
+  if (bestShift === null) return chordNotes;
+
+  const rootCopy: Note = { ...rootNote, octave: rootNote.octave + bestShift };
+  return [rootCopy, ...chordNotes];
 }
 
 function pickRandom<T>(arr: T[], rng: () => number): T | undefined {

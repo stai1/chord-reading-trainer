@@ -27,7 +27,12 @@ interface SettingsModalProps {
 
 type TabId = 'exercise' | 'midi';
 
-/** Whether any exercise-affecting setting differs between `a` and `b`. */
+/**
+ * Whether any field on the Exercise Settings tab differs between `a` and `b`.
+ * Used to decide whether saving settings should reset the in-progress session.
+ * Mirrors §6.1 of the spec — any change on the Exercise tab triggers a reset;
+ * MIDI-tab changes do not.
+ */
 function exerciseSettingsDiffer(a: Settings, b: Settings): boolean {
   const arrEq = <T,>(x: T[], y: T[]): boolean => {
     if (x.length !== y.length) return false;
@@ -41,20 +46,19 @@ function exerciseSettingsDiffer(a: Settings, b: Settings): boolean {
     !arrEq(a.staffFigures, b.staffFigures) ||
     !arrEq(a.staffClefs, b.staffClefs) ||
     !arrEq(a.leadFigures, b.leadFigures) ||
-    a.setLength !== b.setLength
+    a.numeralSystem !== b.numeralSystem ||
+    a.setLength !== b.setLength ||
+    a.showReveal !== b.showReveal ||
+    a.playLeadSheetRoot !== b.playLeadSheetRoot ||
+    a.promptDuration !== b.promptDuration ||
+    a.revealDuration !== b.revealDuration
   );
 }
 
 /** Deep-ish equality for two Settings objects (treats array order as irrelevant). */
 function settingsEqual(a: Settings, b: Settings): boolean {
   if (exerciseSettingsDiffer(a, b)) return false;
-  return (
-    a.numeralSystem === b.numeralSystem &&
-    a.showReveal === b.showReveal &&
-    a.promptDuration === b.promptDuration &&
-    a.revealDuration === b.revealDuration &&
-    a.playExternalMidi === b.playExternalMidi
-  );
+  return a.playExternalMidi === b.playExternalMidi;
 }
 
 export function SettingsModal({
@@ -243,9 +247,14 @@ export function SettingsModal({
             )}
           </div>
 
+          <section
+            className={`settings-group${!draft.exerciseTypes.includes('staff') ? ' disabled' : ''}`}
+          >
+            <h3 className="settings-group-title">Staff sight reading</h3>
+
           <div ref={setRowRef('staffFigures')} className={rowClass('staffFigures')}>
             <label className={!draft.exerciseTypes.includes('staff') ? 'disabled' : ''}>
-              Staff sight reading figures
+              Figures
             </label>
             <div className="multi-list">
               {(['note', 'interval', 'triad', '7th'] as FigureType[]).map((f) => (
@@ -267,7 +276,7 @@ export function SettingsModal({
 
           <div ref={setRowRef('staffClefs')} className={rowClass('staffClefs')}>
             <label className={!draft.exerciseTypes.includes('staff') ? 'disabled' : ''}>
-              Staff sight reading clefs
+              Clefs
             </label>
             <div className="multi-list">
               {(['treble', 'bass', 'both'] as Clef[]).map((c) => (
@@ -293,9 +302,16 @@ export function SettingsModal({
             )}
           </div>
 
+          </section>{/* /staff group */}
+
+          <section
+            className={`settings-group${!draft.exerciseTypes.includes('leadsheet') ? ' disabled' : ''}`}
+          >
+            <h3 className="settings-group-title">Lead sheet reading</h3>
+
           <div ref={setRowRef('leadFigures')} className={rowClass('leadFigures')}>
             <label className={!draft.exerciseTypes.includes('leadsheet') ? 'disabled' : ''}>
-              Lead sheet reading figures
+              Figures
             </label>
             <div className="multi-list">
               {(['triad', '7th'] as FigureType[]).map((f) => (
@@ -316,16 +332,36 @@ export function SettingsModal({
           </div>
 
           <div className="form-row">
-            <label htmlFor="numeral-system">Numeral system</label>
+            <label className={`checkbox-row${!draft.exerciseTypes.includes('leadsheet') ? ' disabled' : ''}`}>
+              <input
+                type="checkbox"
+                checked={draft.playLeadSheetRoot}
+                disabled={!draft.exerciseTypes.includes('leadsheet')}
+                onChange={(e) => setDraft({ ...draft, playLeadSheetRoot: e.target.checked })}
+              />
+              <span>Play lead sheet root</span>
+            </label>
+          </div>
+
+          <div className="form-row">
+            <label
+              htmlFor="numeral-system"
+              className={!draft.exerciseTypes.includes('leadsheet') ? 'disabled' : ''}
+            >
+              Numeral system
+            </label>
             <select
               id="numeral-system"
               value={draft.numeralSystem}
+              disabled={!draft.exerciseTypes.includes('leadsheet')}
               onChange={(e) => setDraft({ ...draft, numeralSystem: e.target.value as NumeralSystem })}
             >
               <option value="scale-relative">Scale-relative</option>
               <option value="major-referential">Major-referential</option>
             </select>
           </div>
+
+          </section>{/* /lead-sheet group */}
 
           <div className="form-row">
             <label htmlFor="set-length">Set length</label>

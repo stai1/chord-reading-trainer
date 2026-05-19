@@ -117,6 +117,8 @@ export function isSettingsShape(value: unknown): value is Settings {
 
   if (typeof v.showReveal !== 'boolean') return false;
 
+  if (typeof v.playLeadSheetRoot !== 'boolean') return false;
+
   // promptDuration / revealDuration: undefined or finite >= 1
   for (const key of ['promptDuration', 'revealDuration'] as const) {
     const dur = v[key];
