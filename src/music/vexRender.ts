@@ -238,9 +238,35 @@ export function renderExercise(
   formatter.joinVoices([trebleVoice]);
   formatter.joinVoices([bassVoice]);
 
-  // Use a generous portion of the stave width for the note column so the
-  // chord head sits centered visually within the staff area.
   formatter.format([trebleVoice, bassVoice], STAVE_WIDTH - 80);
+
+  // Center the chords between the right edge of the key signature and the
+  // right barline, taking into account the wider of the two chords' full
+  // visual widths. We apply the SAME shift to both staves and to every
+  // element on each chord (head + all modifiers), so their pre-shift
+  // alignment is preserved — both clefs' noteheads stay vertically aligned.
+  //
+  // VexFlow quirk: Modifier.setXShift has an asymmetric sign convention. For
+  // LEFT-positioned modifiers (accidentals), the internal offset is negated:
+  // setXShift(t) sets internal xShift = -t. So passing -shift to a left
+  // modifier yields the same screen-space displacement as setXShift(shift)
+  // on the note itself.
+  const NOTE_AREA_END_PADDING = 12;
+  const trebleWidth = trebleStaveNote.getMetrics().width;
+  const bassWidth = bassStaveNote.getMetrics().width;
+  const maxChordWidth = Math.max(trebleWidth, bassWidth);
+  const naturalStart = trebleStave.getNoteStartX();
+  const rightLimit = trebleStave.getNoteEndX() - NOTE_AREA_END_PADDING;
+  const availableWidth = rightLimit - naturalStart;
+  const shift = Math.max(0, (availableWidth - maxChordWidth) / 2);
+  if (shift > 0) {
+    for (const note of [trebleStaveNote, bassStaveNote]) {
+      note.setXShift(shift);
+      for (const mod of note.getModifiers()) {
+        mod.setXShift(-shift);
+      }
+    }
+  }
 
   trebleVoice.draw(ctx, trebleStave);
   bassVoice.draw(ctx, bassStave);
