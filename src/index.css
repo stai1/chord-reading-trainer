@@ -9,8 +9,15 @@
   background-color: #fff;
 }
 
+html, body {
+  height: 100vh;
+  height: 100dvh;
+}
+
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  /* Prevent body scroll so the app stays pinned within the dynamic viewport
+     instead of letting the page extend below the visible area. */
+  overflow: hidden;
 }

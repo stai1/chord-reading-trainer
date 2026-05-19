@@ -89,27 +89,23 @@ export default function App() {
   }, [activeMidi]);
 
   /**
-   * Stacked-timer countdown model.
+   * Phase-timer model.
    *
-   * The active phase's duration is broken into a sequence of "ticks":
-   *   - an optional fractional first tick of `frac` seconds, where
-   *     `frac = duration - floor(duration)`,
-   *   - followed by `floor(duration)` ticks of exactly 1 second each.
+   * A single setTimeout fires `advance()` when the phase's duration elapses.
+   * `phaseStartedAt` records when the active phase began (in ms; nulled when
+   * the phase has no automatic timer). `phaseTotalMs` is the full duration.
+   * On pause, the remaining-ms is captured into a ref so resume can restart
+   * with that remainder.
    *
-   * The displayed countdown is the number of ticks remaining (including the
-   * in-flight one), so it's a discrete integer count that decrements when each
-   * tick fires. The final tick fires `advance()`.
-   *
-   * Pause/resume: when paused, capture the remaining-ms of the in-flight tick
-   * plus the number of full 1s ticks still queued. Resume by rescheduling
-   * with that remaining time as the first tick.
+   * For the pie-clock indicator on the play/pause button, a requestAnimationFrame
+   * loop publishes `progress` (0..1) while the phase is running. The loop stops
+   * on pause and when no timer is active.
    */
-  /** Number of ticks remaining (including the in-flight one). Null if no timer. */
-  const [ticksRemaining, setTicksRemaining] = useState<number | null>(null);
-  /** Absolute ms timestamp when the current in-flight tick fires. */
-  const [tickEndsAt, setTickEndsAt] = useState<number | null>(null);
-  /** While paused, remaining ms of the in-flight tick at pause time. */
-  const pausedRemainingTickMs = useRef<number | null>(null);
+  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(null);
+  const [phaseTotalMs, setPhaseTotalMs] = useState<number | null>(null);
+  const pausedRemainingMsRef = useRef<number | null>(null);
+  /** 0..1 — fraction of the current phase that has elapsed (clockwise pie). */
+  const [progress, setProgress] = useState<number>(0);
 
   useEffect(() => {
     waitForSamples().catch(() => undefined);
@@ -269,75 +265,79 @@ export default function App() {
     return null;
   }, [session.phase, settings.promptDuration, settings.revealDuration]);
 
-  // When the phase or current exercise changes, initialize the tick stack.
-  // Ticks: optional fractional first tick + ceil(D) ticks total (one of which
-  // may be the fractional one). The displayed countdown shows `ticksRemaining`.
+  // When the phase or current exercise changes, initialize the timer baseline.
+  // Pause/resume handling lives in a separate effect.
   useEffect(() => {
-    pausedRemainingTickMs.current = null;
+    pausedRemainingMsRef.current = null;
     if (phaseDurationSec === null) {
-      setTicksRemaining(null);
-      setTickEndsAt(null);
+      setPhaseStartedAt(null);
+      setPhaseTotalMs(null);
+      setProgress(0);
       return;
     }
-    const frac = phaseDurationSec - Math.floor(phaseDurationSec);
-    const firstTickMs = frac > 0 ? frac * 1000 : 1000;
-    const totalTicks = Math.ceil(phaseDurationSec);
-    setTicksRemaining(totalTicks);
+    const total = phaseDurationSec * 1000;
+    setPhaseTotalMs(total);
     if (!session.paused) {
-      setTickEndsAt(Date.now() + firstTickMs);
+      setPhaseStartedAt(Date.now());
     } else {
-      setTickEndsAt(null);
-      pausedRemainingTickMs.current = firstTickMs;
+      setPhaseStartedAt(null);
+      pausedRemainingMsRef.current = total;
     }
+    setProgress(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.phase, session.currentExercise, phaseDurationSec]);
 
-  // Pause / resume handling.
+  // Pause / resume: capture remaining ms on pause; restore on resume by
+  // shifting `phaseStartedAt` so (now - startedAt) equals the elapsed-before-pause.
   useEffect(() => {
     if (session.paused) {
-      if (tickEndsAt !== null) {
-        pausedRemainingTickMs.current = Math.max(0, tickEndsAt - Date.now());
-        setTickEndsAt(null);
+      if (phaseStartedAt !== null && phaseTotalMs !== null) {
+        const elapsed = Date.now() - phaseStartedAt;
+        pausedRemainingMsRef.current = Math.max(0, phaseTotalMs - elapsed);
+        setPhaseStartedAt(null);
       }
     } else {
-      if (pausedRemainingTickMs.current !== null) {
-        setTickEndsAt(Date.now() + pausedRemainingTickMs.current);
-        pausedRemainingTickMs.current = null;
+      if (pausedRemainingMsRef.current !== null && phaseTotalMs !== null) {
+        // Reconstitute a virtual start time such that the remaining ms still
+        // counts down correctly.
+        const elapsedBeforePause = phaseTotalMs - pausedRemainingMsRef.current;
+        setPhaseStartedAt(Date.now() - elapsedBeforePause);
+        pausedRemainingMsRef.current = null;
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.paused]);
 
-  // Schedule the in-flight tick. When it fires: decrement ticksRemaining; if
-  // none left, advance the phase; otherwise queue the next 1-second tick.
+  // Single setTimeout to advance the phase when its duration elapses.
   useEffect(() => {
     clearTimer();
     if (session.paused) return;
-    if (tickEndsAt === null || ticksRemaining === null) return;
-
-    const remaining = tickEndsAt - Date.now();
-
-    const fire = () => {
-      const next = (ticksRemaining ?? 1) - 1;
-      if (next <= 0) {
-        // This was the last tick: advance the phase.
-        setTicksRemaining(null);
-        setTickEndsAt(null);
-        advance();
-      } else {
-        setTicksRemaining(next);
-        setTickEndsAt(Date.now() + 1000);
-      }
-    };
-
+    if (phaseStartedAt === null || phaseTotalMs === null) return;
+    const remaining = phaseStartedAt + phaseTotalMs - Date.now();
     if (remaining <= 0) {
-      fire();
+      advance();
       return;
     }
-    timerRef.current = window.setTimeout(fire, remaining);
+    timerRef.current = window.setTimeout(() => advance(), remaining);
     return clearTimer;
-  }, [session.paused, tickEndsAt, ticksRemaining, advance, clearTimer]);
+  }, [session.paused, phaseStartedAt, phaseTotalMs, advance, clearTimer]);
 
+  // Animation loop that publishes `progress` (0..1) while the timer runs.
+  useEffect(() => {
+    if (session.paused) return;
+    if (phaseStartedAt === null || phaseTotalMs === null) return;
+    let raf = 0;
+    const update = () => {
+      const elapsed = Date.now() - phaseStartedAt;
+      const p = Math.min(1, Math.max(0, elapsed / phaseTotalMs));
+      setProgress(p);
+      if (p < 1) raf = window.requestAnimationFrame(update);
+    };
+    raf = window.requestAnimationFrame(update);
+    return () => window.cancelAnimationFrame(raf);
+  }, [session.paused, phaseStartedAt, phaseTotalMs]);
+
+  // Re-render to re-enable the Next button after its 1-second disable window.
   useEffect(() => {
     if (session.nextEnabledAt <= Date.now()) return;
     const t = window.setTimeout(
@@ -346,10 +346,6 @@ export default function App() {
     );
     return () => window.clearTimeout(t);
   }, [session.nextEnabledAt, nowTick]);
-
-  /** Displayed countdown: the number of ticks still queued. Null when no
-   *  timer is active. Remains shown while paused (frozen at the current count). */
-  const remainingSeconds: number | null = ticksRemaining;
 
   const togglePause = () => {
     setSession((s) => ({ ...s, paused: !s.paused }));
@@ -362,11 +358,10 @@ export default function App() {
   };
 
   const nextDisabled = Date.now() < session.nextEnabledAt;
-  const hasTimer =
-    (settings.promptDuration !== undefined && settings.promptDuration > 0) ||
-    (settings.showReveal &&
-      settings.revealDuration !== undefined &&
-      settings.revealDuration > 0);
+  /** True when the current phase has an automatic timer. Drives the
+   *  enabled-state of the play/pause button and the visibility of its
+   *  surrounding pie-clock indicator. */
+  const currentPhaseHasTimer = phaseDurationSec !== null;
 
   const onSaveSettings = (
     s: Settings,
@@ -404,36 +399,31 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <button
-          className="btn-gear"
-          onClick={() => setSettingsOpen(true)}
-          title="Settings"
-          aria-label="Open settings"
-        >
-          ⚙
-        </button>
-      </header>
+      <button
+        className="btn-gear settings-fab"
+        onClick={() => setSettingsOpen(true)}
+        title="Settings"
+        aria-label="Open settings"
+      >
+        ⚙
+      </button>
 
       <main className="exercise-area">
         <div className="exercise-display">
-          <div className="phase-countdown">
-            {remainingSeconds !== null && (
-              <>
-                Next in: <span className="phase-countdown-number">{remainingSeconds}</span>s
-              </>
-            )}
-          </div>
           <div className="exercise-controls">
-            {hasTimer && (
-              <button
-                className="btn btn-icon"
-                onClick={togglePause}
-                aria-label={session.paused ? 'Play' : 'Pause'}
-              >
-                {session.paused ? '▶' : '⏸'}
-              </button>
-            )}
+            <button
+              className="btn btn-icon play-pause-btn"
+              onClick={togglePause}
+              disabled={!currentPhaseHasTimer}
+              aria-label={session.paused ? 'Play' : 'Pause'}
+            >
+              {currentPhaseHasTimer && (
+                <PhaseClock progress={progress} />
+              )}
+              <span className="play-pause-icon" aria-hidden>
+                {session.paused ? <PlayGlyph /> : <PauseGlyph />}
+              </span>
+            </button>
             <button
               className="btn btn-icon"
               onClick={handleNext}
@@ -502,4 +492,74 @@ function EmptyStaff({ keyId }: { keyId: string }) {
     renderEmptyStaff(ref.current, key);
   }, [keyId]);
   return <div ref={ref} className="staff-display" />;
+}
+
+/**
+ * Simple SVG glyphs for the play/pause button — using the unicode characters
+ * directly (⏸, ▶) makes iOS/Android render them as emoji.
+ */
+function PauseGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="ctrl-glyph">
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </svg>
+  );
+}
+function PlayGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="ctrl-glyph">
+      <path d="M7 4 L20 12 L7 20 Z" />
+    </svg>
+  );
+}
+
+/**
+ * Filled circle overlay for the play/pause button. A pie slice is cut from
+ * the circle starting at 12 o'clock and sweeping clockwise by `progress` of
+ * the full revolution (0..1). When progress is 0, the full circle shows;
+ * when progress is 1, nothing shows.
+ *
+ * Implementation: render the remaining sector as an SVG <path> via the arc
+ * command. The sector spans `progress*2π` from 12 o'clock onward — the area
+ * "still to elapse" — but you asked for the slice "taken out" to grow with
+ * elapsed time, so we draw the *unelapsed* sector, which shrinks.
+ */
+function PhaseClock({ progress }: { progress: number }) {
+  const SIZE = 56; // matches .btn-icon dimensions roughly
+  const R = 26; // radius
+  const CX = SIZE / 2;
+  const CY = SIZE / 2;
+  // Clamp progress.
+  const p = Math.min(1, Math.max(0, progress));
+  // Angle (radians) of the *elapsed* sector, starting at 12 o'clock and
+  // sweeping clockwise. The unelapsed sector spans from `p*2π` to `2π`
+  // (clockwise) on a clock-face mapping.
+  if (p >= 1) return null;
+  if (p <= 0) {
+    return (
+      <svg className="phase-clock" viewBox={`0 0 ${SIZE} ${SIZE}`} aria-hidden>
+        <circle cx={CX} cy={CY} r={R} className="phase-clock-fill" />
+      </svg>
+    );
+  }
+  // Convert angle (clockwise from 12 o'clock) to x/y on the circle.
+  const angleToXY = (theta: number) => {
+    const x = CX + R * Math.sin(theta);
+    const y = CY - R * Math.cos(theta);
+    return [x, y] as const;
+  };
+  const startTheta = p * 2 * Math.PI;
+  const endTheta = 2 * Math.PI;
+  const [sx, sy] = angleToXY(startTheta);
+  const sweep = endTheta - startTheta;
+  const largeArc = sweep > Math.PI ? 1 : 0;
+  // After the arc, we close back through the center to form a wedge.
+  // End point of arc is at 12 o'clock (top), which is (CX, CY - R).
+  const d = `M ${CX} ${CY} L ${sx} ${sy} A ${R} ${R} 0 ${largeArc} 1 ${CX} ${CY - R} Z`;
+  return (
+    <svg className="phase-clock" viewBox={`0 0 ${SIZE} ${SIZE}`} aria-hidden>
+      <path d={d} className="phase-clock-fill" />
+    </svg>
+  );
 }

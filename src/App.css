@@ -7,21 +7,22 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
 }
 
 .app {
-  min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e0e0e0;
+/* Settings button floats over the top-right corner; it doesn't take up
+   layout space, so the exercise area can fill the full viewport height. */
+.settings-fab {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 50;
 }
 
 .btn {
@@ -78,25 +79,32 @@ body {
   display: flex;
   flex-direction: column;
 }
-.phase-countdown {
-  font-size: 14px;
-  color: #666;
-  text-align: center;
-  min-height: 20px;
-  margin-bottom: 4px;
-  flex: 0 0 auto;
-  /* Push the countdown (and everything after) toward the bottom of the column. */
-  margin-top: auto;
-  user-select: none;
-  -webkit-user-select: none;
-  /* Use tabular figures so digit widths are uniform across values. */
-  font-variant-numeric: tabular-nums;
+/* Play/pause button shows an SVG pie-clock behind the icon glyph during
+   timed phases; the icon stays on top via z-index. */
+.play-pause-btn {
+  position: relative;
+  overflow: hidden;
 }
-.phase-countdown-number {
-  display: inline-block;
-  /* Reserve room for up to 3 digits so the surrounding text never shifts. */
-  min-width: 2.2ch;
-  text-align: right;
+.phase-clock {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.phase-clock-fill {
+  fill: #37c;
+  fill-opacity: 0.5;
+}
+.play-pause-icon {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+}
+.ctrl-glyph {
+  width: 26px;
+  height: 26px;
+  fill: currentColor;
 }
 .exercise-controls {
   display: flex;
@@ -111,11 +119,13 @@ body {
   justify-content: center;
   min-height: 0;
 }
-/* Piano roll is the last child of .exercise-display. The flex space is
-   absorbed above .exercise-controls (via its margin-top: auto), so the
-   controls + region + piano roll stack naturally at the bottom. */
+/* Piano roll is the last child of .exercise-display. The other items stack
+   naturally from the top; the piano roll is pinned to the bottom via
+   margin-top: auto, so any unused vertical space sits between the exercise
+   region and the piano roll. */
 .exercise-display > .piano-roll {
   flex: 0 0 auto;
+  margin-top: auto;
 }
 
 .lead-sheet-display {
@@ -174,6 +184,11 @@ body {
   color: #888;
   margin: 4px 0;
   font-style: italic;
+}
+/* Staff-mode set cue: render the empty grand staff at half opacity to make
+   the cue phase visually distinct from the prompt/reveal phases. */
+.cue-display.staff .staff-display {
+  opacity: 0.5;
 }
 
 .modal-backdrop {
