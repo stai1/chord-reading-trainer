@@ -45,7 +45,7 @@ const initialSession: SessionState = {
   exerciseInSet: 0,
   currentExercise: null,
   phase: 'cue',
-  paused: false,
+  paused: true,
   nextEnabledAt: 0,
 };
 
