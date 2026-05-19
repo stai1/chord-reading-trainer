@@ -7,7 +7,6 @@ import {
   Accidental,
   StaveConnector,
   Barline,
-  TextBracket,
 } from 'vexflow';
 import type { Exercise, KeySignature, Note } from './types';
 import { noteLetterIndex, accidentalSemitone } from './midi';
@@ -15,15 +14,14 @@ import { diatonicAccidentalFor } from './chordToNotes';
 
 /**
  * Threshold for applying 8va to the treble clef: trigger when any treble note's
- * letter position (ignoring accidental) is strictly above the B6 ledger line.
+ * letter position (ignoring accidental) is strictly above the G6 ledger line.
  *
- * Examples that trigger: C7, C♭7 (letter C is above B), C♯7, D7, etc.
- * Examples that don't: B6, B♭6, B♯6 (B♯6 sounds like C7 but its letter is B,
- * which sits on the B6 line, so it's exempt).
+ * Examples that trigger: A6, A♭6, B6, B♭6, C7, C♭7, etc.
+ * Examples that don't: G6, G♭6, G♯6 (letter G sits on the G6 line).
  *
- * Letter index of B6 = (6+1)*12 + 11 = 95. We trigger on letter index > 95.
+ * Letter index of G6 = (6+1)*12 + 7 = 91. We trigger on letter index > 91.
  */
-const TREBLE_8VA_THRESHOLD = 95; // B6 letter position
+const TREBLE_8VA_THRESHOLD = 91; // G6 letter position
 
 function trebleNeeds8va(notes: Note[]): boolean {
   for (const n of notes) {
@@ -271,16 +269,37 @@ export function renderExercise(
   trebleVoice.draw(ctx, trebleStave);
   bassVoice.draw(ctx, bassStave);
 
-  // 8va bracket above the treble chord, if applicable.
+  // 8va indicator above the treble chord, if applicable. We draw it manually
+  // (rather than via VexFlow's TextBracket) so the dotted line can extend all
+  // the way to the right barline rather than only spanning the chord. The
+  // text is placed directly above the top note of the chord.
   if (trebleEightVa) {
-    const bracket = new TextBracket({
-      start: trebleStaveNote,
-      stop: trebleStaveNote,
-      text: '8',
-      superscript: 'va',
-      position: TextBracket.Position.TOP,
-    });
-    bracket.setContext(ctx).draw();
+    const bbox = trebleStaveNote.getBoundingBox();
+    const topNoteX = trebleStaveNote.getNoteHeadBeginX();
+    const topNoteY = bbox.getY();
+    const textY = topNoteY - 6; // baseline a bit above the top note
+    const barlineX = trebleStave.getNoteEndX();
+
+    ctx.save();
+    ctx.setFont('Times New Roman', 14, 'normal', 'italic');
+    const label = '8va';
+    ctx.fillText(label, topNoteX, textY);
+
+    // Dotted line from just past the text to just before the right barline.
+    const approxTextWidth = 22; // 8va in 14px italic ≈ 22px
+    const lineStartX = topNoteX + approxTextWidth + 4;
+    const lineEndX = barlineX - 2;
+    const lineY = textY - 3;
+    if (lineEndX > lineStartX) {
+      ctx.beginPath();
+      ctx.setLineDash([3, 3]);
+      ctx.setLineWidth(1);
+      ctx.moveTo(lineStartX, lineY);
+      ctx.lineTo(lineEndX, lineY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
   }
 }
 
