@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-66 -66 131 131">
+  <!--
+    App icon: a whole-note "iris" inside an eye formed by two circular arcs
+    meeting at 90° at the corners.
+
+    Construction:
+      - Whole note: outer ellipse rx=40, ry=25, rotated -20°. The "hole" is
+        a smaller inner ellipse offset to give the engraver's broad-pen
+        thickness illusion.
+      - Eye: two circular arcs (one on top, one on bottom). Each arc is
+        tangent to the whole-note's outer ellipse and the two arcs meet
+        each other at 90° at the corners of the eye.
+
+    Corner placement: the arcs meet at the points (±C, 0) where C is the
+    half-distance between the eye corners. With circular arcs of radius R
+    centered above/below the x-axis and the arcs tangent to the whole note,
+    a clean visual balance comes from R ≈ √2 · C, which makes the arcs
+    cross the x-axis at ±C at 45° from vertical — i.e., the tangents meet
+    at right angles there.
+
+    For this sketch: corners at (±64, 0), arc radius R = 64·√2 ≈ 90.5,
+    arc centers at (0, ±64).
+  -->
+
+  <!-- Eye outline: two circular arcs meeting at corners (±64, 0). -->
+  <g fill="none" stroke="#222" stroke-width="4" stroke-linecap="round">
+    <!-- Top eyelid: arc of circle centered at (0, 64), radius 90.5.
+         Sweeps clockwise from (-64, 0) to (64, 0) over the top. -->
+    <path d="M -64 0 A 90.5096679919 90.5096679919 0 0 1 64 0" />
+    <!-- Bottom eyelid: arc of circle centered at (0, -64), radius 90.5.
+         Sweeps counter-clockwise from (-64, 0) to (64, 0) under the bottom. -->
+    <path d="M -64 0 A 90.5096679919 90.5096679919 0 0 0 64 0" />
+  </g>
+
+  <!-- Whole note as the iris/pupil.
+       Outer oval: horizontal, wider than tall (≈ 8:5 ratio).
+       Inner oval: tall and narrow, tilted ≈ -35° from vertical so its long
+       axis runs from lower-left to upper-right (per standard engraver style).
+       The inner oval is *cut out* as a transparent hole (rather than filled
+       white) via a mask, so the icon renders correctly on any background. -->
+  <defs>
+    <mask id="whole-note-hole">
+      <!-- Outer oval = white (visible), inner oval = black (cut out). -->
+      <ellipse cx="0" cy="0" rx="39" ry="24.5096679919" fill="#fff" />
+      <ellipse cx="0" cy="0" rx="13" ry="22" fill="#000" transform="rotate(-35)" />
+    </mask>
+  </defs>
+  <ellipse cx="0" cy="0" rx="39" ry="24.5096679919" fill="#222" mask="url(#whole-note-hole)" />
+</svg>
