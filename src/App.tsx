@@ -122,7 +122,15 @@ export default function App() {
   }, [settings]);
 
   // Pause the session while the settings modal is open; resume when it closes.
+  // Skip the initial mount so the session keeps its initial `paused: true`
+  // (which gates audio behind the user's first play press, satisfying mobile
+  // autoplay policy).
+  const settingsOpenedOnce = useRef(false);
   useEffect(() => {
+    if (!settingsOpenedOnce.current) {
+      settingsOpenedOnce.current = settingsOpen;
+      if (!settingsOpen) return;
+    }
     setSession((s) => ({ ...s, paused: settingsOpen }));
   }, [settingsOpen]);
 
