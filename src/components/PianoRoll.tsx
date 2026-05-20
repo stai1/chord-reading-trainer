@@ -157,24 +157,37 @@ export function PianoRoll({
   }, [onNoteOff]);
 
   // ---- Touch handlers ----
-  const handleTouchStart = (e: React.TouchEvent) => {
-    let triggeredDrag = false;
-    for (const touch of Array.from(e.changedTouches)) {
-      const midi = hitTest(touch.clientX, touch.clientY);
-      if (midi === null) {
-        touchDragActive.current.set(touch.identifier, false);
-        continue;
+  // touchstart is attached as a NATIVE listener (not via React's onTouchStart
+  // prop) with `{ passive: false }` so preventDefault() actually works. React
+  // 18+ binds onTouchStart as a passive listener, which silently ignores
+  // preventDefault — and without that, mobile browsers synthesize a
+  // mousedown/mouseup pair from a tap, re-triggering the note on finger lift.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const handleTouchStartNative = (e: TouchEvent) => {
+      let triggeredDrag = false;
+      for (const touch of Array.from(e.changedTouches)) {
+        const midi = hitTest(touch.clientX, touch.clientY);
+        if (midi === null) {
+          touchDragActive.current.set(touch.identifier, false);
+          continue;
+        }
+        touchDragActive.current.set(touch.identifier, true);
+        touchCurrentMidi.current.set(touch.identifier, midi);
+        if (!triggeredDrag) {
+          triggeredDrag = true;
+          onDragStart?.();
+        }
+        onNoteOn?.(midi);
       }
-      touchDragActive.current.set(touch.identifier, true);
-      touchCurrentMidi.current.set(touch.identifier, midi);
-      if (!triggeredDrag) {
-        triggeredDrag = true;
-        onDragStart?.();
-      }
-      onNoteOn?.(midi);
-    }
-    if (triggeredDrag) e.preventDefault();
-  };
+      if (triggeredDrag) e.preventDefault();
+    };
+    svg.addEventListener('touchstart', handleTouchStartNative, { passive: false });
+    return () => {
+      svg.removeEventListener('touchstart', handleTouchStartNative);
+    };
+  }, [onNoteOn, onDragStart]);
 
   const handleTouchMove = (e: React.TouchEvent) => {
     for (const touch of Array.from(e.changedTouches)) {
@@ -234,7 +247,6 @@ export function PianoRoll({
       className="piano-roll"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
-      onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
